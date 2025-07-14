@@ -1,40 +1,53 @@
-MODEL(
-  name 'customer_lifetime_value'
-  kind INCREMENTAL_BY_UNIQUE_KEY unique_key user_id lookback 5
-  owner 'customer_analytics'
-  cron '0 2 * * *'
+MODEL (
+  name 'viseta_test7.customer_lifetime_value',
+  owner 'customer_analytics',
+  cron '0 2 * * *',
+  kind INCREMENTAL_BY_UNIQUE_KEY unique_key user_id lookback 5,
+  partitioned_by (user_id),
+  tags ('customers', 'lifetime_value', 'orders'),
   audits (
-    assert_not_null_user_id CHECK (user_id IS NOT NULL)
-  )
-  tags (
-    'customer', 'lifetime_value', 'orders'
+    assert exists(user_id) as 'user_id must not be null'
   )
 ) AS
 WITH
   stage_orders AS (
     SELECT
-      id,
+      id AS order_id,
       user_id,
       grand_total,
       created_at
-    FROM default.orders
-    WHERE user_id IS NOT NULL
+    FROM
+      orders
+    WHERE
+      user_id IS NOT NULL
   ),
-  transform_aggregations AS (
+  transform_customer_orders AS (
     SELECT
       user_id,
-      COALESCE(SUM(grand_total), 0) AS life_time_value,
-      COUNT(id) AS count_of_orders
-    FROM stage_orders
-    GROUP BY user_id
+      COUNT(order_id) AS count_of_orders,
+      SUM(grand_total) AS life_time_value
+    FROM
+      stage_orders
+    GROUP BY
+      user_id
   ),
-  final AS (
+  final_customers AS (
     SELECT
       u.id AS user_id,
       u.name AS user_name,
-      t.life_time_value,
-      t.count_of_orders
-    FROM transform_aggregations t
-    JOIN default.users u ON u.id = t.user_id
+      COALESCE(tc.count_of_orders, 0) AS count_of_orders,
+      COALESCE(tc.life_time_value, 0) AS life_time_value
+    FROM
+      users u
+    LEFT JOIN
+      transform_customer_orders tc ON u.id = tc.user_id
+    WHERE
+      u.id IS NOT NULL
   )
-SELECT user_id, user_name, life_time_value, count_of_orders FROM final;
+SELECT
+  user_id,
+  user_name,
+  count_of_orders,
+  life_time_value
+FROM
+  final_customers;
