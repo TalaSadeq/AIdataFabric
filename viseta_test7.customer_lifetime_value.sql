@@ -1,7 +1,7 @@
 MODEL(
   name 'viseta_test7.customer_lifetime_value',
   owner 'customer_analytics',
-  kind INCREMENTAL_BY_UNIQUE_KEY (unique_key user_id, lookback 2),
+  kind INCREMENTAL_BY_UNIQUE_KEY unique_key user_id, lookback 2,
   cron '0 2 * * *',
   audits (
     { name 'must_have_data_user_id', query 'SELECT user_id FROM orders WHERE user_id IS NULL LIMIT 1', condition 'ZERO_ROWS' },
