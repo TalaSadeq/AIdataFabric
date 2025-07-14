@@ -1,6 +1,6 @@
 MODEL viseta_test7.customer_lifetime_value
 (
-  kind INCREMENTAL_BY_UNIQUE_KEY (unique_key user_id lookback 2),
+  kind INCREMENTAL_BY_UNIQUE_KEY unique_key user_id lookback 2,
   owner 'customer_analytics',
   tags ('lifetime_value', 'customer', 'orders'),
   audits (
