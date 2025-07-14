@@ -18,7 +18,8 @@ WITH
       grand_total,
       created_at
     FROM orders
-    WHERE user_id IS NOT NULL AND created_at IS NOT NULL
+    WHERE user_id IS NOT NULL
+      AND created_at IS NOT NULL
   ),
   transform_customer_orders AS (
     SELECT
