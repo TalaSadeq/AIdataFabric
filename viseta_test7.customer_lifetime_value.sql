@@ -1,52 +1,81 @@
-MODEL viseta_test7.customer_lifetime_value
-(
-  kind INCREMENTAL_BY_UNIQUE_KEY unique_key user_id lookback 2,
+MODEL (
+  name viseta_test7.customer_lifetime_value,
   owner 'customer_analytics',
-  tags ('lifetime_value', 'customer', 'orders'),
-  audits (
-    assert_not_null(user_id),
-    assert_not_null(created_at)
+  cron '0 2 * * *',
+  kind INCREMENTAL_BY_UNIQUE_KEY (
+    unique_key customer_id,
+    lookback 5
+  ),
+  grain customer_id,
+  tags (
+    'customer_analytics',
+    'ltv',
+    'retention'
   )
-) AS
+);
+
+AUDIT (
+  NOT_NULL,
+  columns (customer_id)
+);
+
+AUDIT (
+  POSITIVE_VALUES,
+  columns (life_time_value, count_of_orders)
+);
+
+/*
+Stage CTEs: Select and filter source data to ensure data quality and relevance.
+*/
 WITH stage_orders AS (
   SELECT
-    user_id,
-    id AS order_id,
-    created_at,
-    COALESCE(grand_total, 0) AS grand_total
-  FROM orders
-  WHERE user_id IS NOT NULL
-    AND created_at IS NOT NULL
-    AND created_at >= CURRENT_DATE - INTERVAL '30' DAY
+    customer_id,
+    order_id,
+    grand_total -- Assumed column based on `what_to_calculate`.
+  FROM raw.orders
+  WHERE
+    customer_id IS NOT NULL
 ),
-transform_aggregates AS (
+
+stage_customers AS (
   SELECT
-    user_id,
-    COUNT(order_id) AS count_of_orders,
-    SUM(grand_total) AS life_time_value,
-    MIN(created_at) AS first_order_date
+    customer_id
+  FROM raw.customers
+  WHERE
+    customer_id IS NOT NULL
+),
+
+/*
+Transform CTEs: Perform aggregations to calculate business metrics.
+*/
+transform_order_aggregates AS (
+  SELECT
+    customer_id,
+    SUM(COALESCE(grand_total, 0)) AS life_time_value,
+    COUNT(order_id) AS count_of_orders
   FROM stage_orders
-  GROUP BY user_id
+  GROUP BY
+    customer_id
 ),
-final_with_windows AS (
+
+/*
+Final CTE: Join customer data with aggregated order metrics to create the complete view.
+*/
+final AS (
   SELECT
-    user_id,
-    count_of_orders,
-    life_time_value,
-    ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY first_order_date) AS row_num,
-    PERCENT_RANK() OVER (ORDER BY life_time_value) AS life_time_value_percent_rank,
-    AVG(life_time_value) OVER (ORDER BY user_id ROWS BETWEEN 29 PRECEDING AND CURRENT ROW) AS life_time_value_30d_avg,
-    LAG(life_time_value, 1) OVER (PARTITION BY user_id ORDER BY user_id) AS life_time_value_lag_1,
-    LAG(count_of_orders, 1) OVER (PARTITION BY user_id ORDER BY user_id) AS count_of_orders_lag_1
-  FROM transform_aggregates
+    sc.customer_id,
+    COALESCE(toa.life_time_value, 0) AS life_time_value,
+    COALESCE(toa.count_of_orders, 0) AS count_of_orders
+  FROM stage_customers AS sc
+  LEFT JOIN transform_order_aggregates AS toa
+    ON sc.customer_id = toa.customer_id
 )
+
+/*
+Select all columns from the final CTE to produce the model's output.
+*/
 SELECT
-  user_id,
+  customer_id,
   life_time_value,
-  count_of_orders,
-  life_time_value_percent_rank,
-  life_time_value_30d_avg,
-  life_time_value_lag_1,
-  count_of_orders_lag_1
-FROM final_with_windows
-WHERE user_id IS NOT NULL;
+  count_of_orders
+FROM final;
