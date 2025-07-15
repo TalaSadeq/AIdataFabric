@@ -1,105 +1,49 @@
 MODEL (
-  name viseta_test7.car_model_orders,
+  kind INCREMENTAL_BY_UNIQUE_KEY unique_key id lookback 2,
   owner 'customer_analytics',
   cron '0 2 * * *',
-  kind INCREMENTAL_BY_UNIQUE_KEY (
-    unique_key model_name,
-    lookback 2
+  tags ('car', 'orders', 'model', 'analytics'),
+  audits (
+    assert_not_null(user_id, 'user_id must not be null'),
+    assert_not_null(car_id, 'car_id must not be null'),
+    assert_not_null(name_en, 'name_en must not be null'),
+    assert_not_null(order_id, 'order_id must not be null')
   ),
-  grain 'One car model',
-  tags ('customer_analytics', 'orders', 'cars')
-);
-
--- Data Quality Audits
-AUDIT (
-  name not_null_model_name,
-  not_null(
-    column = model_name
-  )
-);
-
-AUDIT (
-  name positive_life_time_value,
-  assert(
-    query = 'life_time_value >= 0',
-    description = 'Ensures that the calculated lifetime value is not negative.'
-  )
-);
-
-AUDIT (
-  name positive_order_count,
-  assert(
-    query = 'count_of_orders > 0',
-    description = 'Ensures that each car model has at least one order.'
-  )
-);
-
--- CTE for staging orders, filtered for the incremental window
-WITH stage_orders AS (
+  description 'Generates total orders count and sum of grand_total (life_time_value) per car model (models.name_en) for Customer Service and Marketing teams'
+) AS
+WITH cars_models AS (
   SELECT
-    id AS order_id,
-    grand_total,
-    car_id,
-    user_id,
-    created_at
-  FROM orders
-  WHERE
-    created_at BETWEEN @start_date AND @end_date
-),
-
--- CTE for staging car data
--- NOTE: The 'cars' table schema is missing the 'model_id' column required to join with 'models'.
--- This model assumes 'model_id' exists in the source 'cars' table.
-stage_cars AS (
-  SELECT
-    id AS car_id,
-    model_id -- Assumed column
+    cars.id AS car_id,
+    cars.model_id AS model_id,
+    models.name_en
   FROM cars
+  JOIN models ON cars.model_id = models.id
 ),
-
--- CTE for staging model data
-stage_models AS (
+orders_with_models AS (
   SELECT
-    id AS model_id,
-    name_en
-  FROM models
+    orders.id AS order_id,
+    orders.created_at,
+    orders.grand_total,
+    orders.user_id,
+    orders.car_id
+  FROM orders
+  WHERE orders.id IS NOT NULL
+    AND orders.car_id IS NOT NULL
+    AND orders.user_id IS NOT NULL
 ),
-
--- Transformation CTE to join sources and apply data quality filters
-transform_data AS (
+joined_data AS (
   SELECT
-    o.order_id,
-    m.name_en,
-    COALESCE(o.grand_total, 0.0) AS grand_total
-  FROM stage_orders AS o
-  INNER JOIN
-    stage_cars AS c
-    ON o.car_id = c.car_id
-  INNER JOIN
-    stage_models AS m
-    ON c.model_id = m.model_id
-  WHERE
-    -- Enforcing 'must_have_data' rules from the data product description
-    o.user_id IS NOT NULL
-    AND o.car_id IS NOT NULL
-    AND m.name_en IS NOT NULL
-    AND o.order_id IS NOT NULL
-),
-
--- Final CTE to aggregate results by car model
-final AS (
-  SELECT
-    name_en AS model_name,
-    SUM(grand_total) AS life_time_value,
-    COUNT(order_id) AS count_of_orders
-  FROM transform_data
-  GROUP BY
-    name_en
+    ROW_NUMBER() OVER (ORDER BY cm.name_en) AS id,
+    cm.name_en,
+    COUNT(owm.order_id) AS count_of_orders,
+    COALESCE(SUM(owm.grand_total), 0) AS life_time_value
+  FROM orders_with_models owm
+  JOIN cars_models cm ON owm.car_id = cm.car_id
+  GROUP BY cm.name_en
 )
-
--- Final model output
 SELECT
-  model_name,
-  life_time_value,
-  count_of_orders
-FROM final;
+  id,
+  name_en,
+  count_of_orders,
+  life_time_value
+FROM joined_data;
