@@ -14,12 +14,12 @@ MODEL (
 WITH cars_models AS (
   SELECT
     cars.id AS car_id,
-    cars.model_id AS model_id,
+    cars.model_id,
     models.name_en
   FROM cars
-  JOIN models ON cars.model_id = models.id
+  INNER JOIN models ON cars.model_id = models.id
 ),
-orders_with_models AS (
+validated_orders AS (
   SELECT
     orders.id AS order_id,
     orders.created_at,
@@ -31,14 +31,14 @@ orders_with_models AS (
     AND orders.car_id IS NOT NULL
     AND orders.user_id IS NOT NULL
 ),
-joined_data AS (
+final_data AS (
   SELECT
     ROW_NUMBER() OVER (ORDER BY cm.name_en) AS id,
     cm.name_en,
-    COUNT(owm.order_id) AS count_of_orders,
-    COALESCE(SUM(owm.grand_total), 0) AS life_time_value
-  FROM orders_with_models owm
-  JOIN cars_models cm ON owm.car_id = cm.car_id
+    COUNT(vo.order_id) AS count_of_orders,
+    COALESCE(SUM(vo.grand_total), 0) AS life_time_value
+  FROM validated_orders vo
+  INNER JOIN cars_models cm ON vo.car_id = cm.car_id
   GROUP BY cm.name_en
 )
 SELECT
@@ -46,4 +46,4 @@ SELECT
   name_en,
   count_of_orders,
   life_time_value
-FROM joined_data;
+FROM final_data;
