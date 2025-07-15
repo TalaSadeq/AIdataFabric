@@ -34,7 +34,7 @@ WITH stage_orders AS (
     grand_total -- Assumed column based on `what_to_calculate`.
   FROM raw.orders
   WHERE
-    customer_id IS NOT NULL
+    customer_id IS NOT NULL -- Corresponds to data_quality_rules: must_have_data['user_id']
 ),
 
 stage_customers AS (
