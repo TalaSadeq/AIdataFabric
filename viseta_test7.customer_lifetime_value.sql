@@ -29,18 +29,22 @@ Stage CTEs: Select and filter source data to ensure data quality and relevance.
 */
 WITH stage_orders AS (
   SELECT
-    customer_id,
-    order_id,
-    grand_total -- Assumed column based on `what_to_calculate`.
-  FROM raw.orders
+    o.customer_id,
+    o.order_id,
+    op.payment_value
+  FROM orders AS o
+  INNER JOIN order_payments AS op
+    ON o.order_id = op.order_id
   WHERE
-    customer_id IS NOT NULL -- Corresponds to data_quality_rules: must_have_data['user_id']
+    o.customer_id IS NOT NULL
+    AND o.order_status IN ('delivered', 'approved')
+    AND op.payment_value > 0
 ),
 
 stage_customers AS (
   SELECT
     customer_id
-  FROM raw.customers
+  FROM customers
   WHERE
     customer_id IS NOT NULL
 ),
@@ -51,8 +55,8 @@ Transform CTEs: Perform aggregations to calculate business metrics.
 transform_order_aggregates AS (
   SELECT
     customer_id,
-    SUM(COALESCE(grand_total, 0)) AS life_time_value,
-    COUNT(order_id) AS count_of_orders
+    SUM(COALESCE(payment_value, 0)) AS life_time_value,
+    COUNT(DISTINCT order_id) AS count_of_orders
   FROM stage_orders
   GROUP BY
     customer_id
