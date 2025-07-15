@@ -27,21 +27,7 @@ AUDIT (
 /*
 Stage CTEs: Select and filter source data to ensure data quality and relevance.
 */
-WITH stage_orders AS (
-  SELECT
-    o.customer_id,
-    o.order_id,
-    op.payment_value
-  FROM orders AS o
-  INNER JOIN order_payments AS op
-    ON o.order_id = op.order_id
-  WHERE
-    o.customer_id IS NOT NULL
-    AND o.order_status IN ('delivered', 'approved')
-    AND op.payment_value > 0
-),
-
-stage_customers AS (
+WITH stage_customers AS (
   SELECT
     customer_id
   FROM customers
@@ -49,15 +35,29 @@ stage_customers AS (
     customer_id IS NOT NULL
 ),
 
+stage_order_payments AS (
+  SELECT
+    o.customer_id,
+    o.order_id,
+    p.payment_value
+  FROM orders AS o
+  JOIN order_payments AS p
+    ON o.order_id = p.order_id
+  WHERE
+    o.customer_id IS NOT NULL
+    AND o.order_status IN ('delivered', 'approved')
+    AND p.payment_value > 0
+),
+
 /*
 Transform CTEs: Perform aggregations to calculate business metrics.
 */
-transform_order_aggregates AS (
+transform_customer_aggregates AS (
   SELECT
     customer_id,
     SUM(COALESCE(payment_value, 0)) AS life_time_value,
     COUNT(DISTINCT order_id) AS count_of_orders
-  FROM stage_orders
+  FROM stage_order_payments
   GROUP BY
     customer_id
 ),
@@ -68,11 +68,11 @@ Final CTE: Join customer data with aggregated order metrics to create the comple
 final AS (
   SELECT
     sc.customer_id,
-    COALESCE(toa.life_time_value, 0) AS life_time_value,
-    COALESCE(toa.count_of_orders, 0) AS count_of_orders
+    COALESCE(tca.life_time_value, 0) AS life_time_value,
+    COALESCE(tca.count_of_orders, 0) AS count_of_orders
   FROM stage_customers AS sc
-  LEFT JOIN transform_order_aggregates AS toa
-    ON sc.customer_id = toa.customer_id
+  LEFT JOIN transform_customer_aggregates AS tca
+    ON sc.customer_id = tca.customer_id
 )
 
 /*
